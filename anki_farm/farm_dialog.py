@@ -76,9 +76,11 @@ class FarmDialog(QDialog):
     # ---- Python -> JS --------------------------------------------------
 
     def push(self, event: dict[str, Any] | None = None) -> None:
+        conf = storage.addon_config()
         payload = {
             "state": state_json(storage.load()),
-            "autoPlant": bool(storage.addon_config().get("auto_plant", False)),
+            "autoPlant": bool(conf.get("auto_plant", False)),
+            "sound": bool(conf.get("sound", True)),
             "event": event,
         }
         self.web.eval(f"AnkiFarm.render({json.dumps(payload)})")
@@ -91,8 +93,8 @@ class FarmDialog(QDialog):
         msg = json.loads(cmd[len("farm:") :])
         op = msg.get("op")
 
-        if op == "auto_plant":
-            storage.set_addon_config("auto_plant", bool(msg.get("value")))
+        if op in ("auto_plant", "sound"):
+            storage.set_addon_config(op, bool(msg.get("value")))
             self.push()
             return None
 

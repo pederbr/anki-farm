@@ -13,6 +13,9 @@ from typing import Any
 from .catalog import (
     MATURE_RARITY_BOOST,
     MAX_TIER,
+    PACKET_GUARANTEED_RARITY,
+    PACKET_SIZE,
+    PACKETS_PER_DAY,
     RARITIES,
     SPECIES_BY_ID,
     species_in_rarity,
@@ -37,17 +40,24 @@ class MoveResult:
 # ---- rewards -----------------------------------------------------------
 
 
-def roll_rarity(rng: random.Random, mature: bool = False) -> str:
+def roll_rarity(
+    rng: random.Random, mature: bool = False, min_rarity: str | None = None
+) -> str:
+    order = list(RARITIES)
+    allowed = order[order.index(min_rarity) :] if min_rarity else order
     weights = []
-    for rarity, (_name, weight) in RARITIES.items():
+    for rarity in allowed:
+        weight = RARITIES[rarity][1]
         if mature and rarity != "common":
             weight *= MATURE_RARITY_BOOST
         weights.append(weight)
-    return rng.choices(list(RARITIES), weights=weights)[0]
+    return rng.choices(allowed, weights=weights)[0]
 
 
-def roll_species(rng: random.Random, mature: bool = False) -> str:
-    rarity = roll_rarity(rng, mature)
+def roll_species(
+    rng: random.Random, mature: bool = False, min_rarity: str | None = None
+) -> str:
+    rarity = roll_rarity(rng, mature, min_rarity)
     return rng.choice(species_in_rarity(rarity)).id
 
 
@@ -58,6 +68,7 @@ def grant_seed(
     revlog_id: int | None = None,
     auto_plant: bool = False,
     rng: random.Random | None = None,
+    packet_deck: int | None = None,
 ) -> str | None:
     """Give the player one seed. Returns the tile it was planted on, or None
     if it went into the bag."""
@@ -72,9 +83,45 @@ def grant_seed(
     state.discover(species, 1)
     state.bump_stat("seeds_earned")
     if revlog_id is not None:
-        state.recent_rewards.append({"rid": revlog_id, "species": species, "tile": tile})
+        reward: dict[str, Any] = {"rid": revlog_id, "species": species, "tile": tile}
+        if packet_deck is not None:
+            reward["packet"] = packet_deck
+        state.recent_rewards.append(reward)
         del state.recent_rewards[:-RECENT_REWARDS_KEPT]
     return tile
+
+
+def claim_packet(
+    state: FarmState,
+    *,
+    day: int,
+    deck_id: int,
+    revlog_id: int | None = None,
+    auto_plant: bool = False,
+    rng: random.Random | None = None,
+) -> list[str] | None:
+    """Give the daily seed packet for clearing a deck, unless this deck has
+    already paid out today or the daily limit is reached. Returns the seeds."""
+    rng = rng or random
+    if state.daily.get("day") != day:
+        state.daily = {"day": day, "decks": []}
+    claimed = state.daily["decks"]
+    if deck_id in claimed or len(claimed) >= PACKETS_PER_DAY:
+        return None
+    seeds = [roll_species(rng) for _ in range(PACKET_SIZE - 1)]
+    seeds.append(roll_species(rng, min_rarity=PACKET_GUARANTEED_RARITY))
+    for species in seeds:
+        grant_seed(
+            state,
+            species,
+            revlog_id=revlog_id,
+            auto_plant=auto_plant,
+            rng=rng,
+            packet_deck=deck_id,
+        )
+    claimed.append(deck_id)
+    state.bump_stat("packets")
+    return seeds
 
 
 def revoke_reward(state: FarmState, reward: dict[str, Any]) -> bool:
@@ -101,6 +148,12 @@ def revoke_reward(state: FarmState, reward: dict[str, Any]) -> bool:
         state.bump_stat("seeds_earned", -1)
     if reward in state.recent_rewards:
         state.recent_rewards.remove(reward)
+    # undoing the review that cleared a deck makes its packet claimable again
+    deck = reward.get("packet")
+    claimed = state.daily.get("decks", [])
+    if deck is not None and deck in claimed:
+        claimed.remove(deck)
+        state.bump_stat("packets", -1)
     return removed
 
 

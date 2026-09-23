@@ -173,7 +173,7 @@ anki_farm/
 |---|---|---|---|
 | **M0** ✅ | Skeleton | Add-on loads, Tools menu opens an empty dialog, symlinked dev setup | Opens in Anki without errors |
 | **M1** ✅ | MVP loop | Review → seed in bag (with tooltip), 5×5 board, plant from bag, merge-2, save via col config, 4 common species with placeholder coloured squares | You can play for a day of reviews |
-| **M2** | Look & feel | Pixel sprites, all 7 tiers, rarity table, animations, sound, anti-cheese rules plus undo | It feels like a game |
+| **M2** ✅ | Look & feel | Pixel sprites, all 7 tiers, rarity table, animations, sound, anti-cheese rules plus undo | It feels like a game |
 | **M3** | Economy | Coins, selling, farm expansion, almanac | There's a reason to keep merging |
 | **M4** | Goals | Orders board, farmer level/XP, first 2 buildings | Daily goals exist |
 | **M5** | Depth | Animals, cross-breeding, seasons, streak weather | Long-term hooks |

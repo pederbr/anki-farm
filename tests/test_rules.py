@@ -7,7 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "anki_farm"))
 
 from game import rules  # noqa: E402
-from game.catalog import MAX_TIER, SPECIES_BY_ID  # noqa: E402
+from game.catalog import MAX_TIER, PACKET_SIZE, PACKETS_PER_DAY, SPECIES_BY_ID  # noqa: E402
 from game.state import FarmState, Plant  # noqa: E402
 
 
@@ -58,6 +58,43 @@ class RewardTests(unittest.TestCase):
         normal = sum(rules.roll_rarity(rng) != "common" for _ in range(20000))
         boosted = sum(rules.roll_rarity(rng, mature=True) != "common" for _ in range(20000))
         self.assertGreater(boosted, normal)
+
+
+class PacketTests(unittest.TestCase):
+    def test_packet_once_per_deck_per_day(self):
+        s = FarmState()
+        seeds = rules.claim_packet(s, day=100, deck_id=1, revlog_id=9, rng=random.Random(3))
+        self.assertEqual(len(seeds), PACKET_SIZE)
+        self.assertEqual(s.bag_total(), PACKET_SIZE)
+        self.assertIsNone(rules.claim_packet(s, day=100, deck_id=1))
+        self.assertIsNotNone(rules.claim_packet(s, day=101, deck_id=1))
+
+    def test_packet_has_a_rare_or_better(self):
+        rng = random.Random(7)
+        for day in range(200):
+            seeds = rules.claim_packet(FarmState(), day=day, deck_id=1, rng=rng)
+            self.assertIn(SPECIES_BY_ID[seeds[-1]].rarity, ("rare", "epic", "legendary"))
+
+    def test_daily_packet_limit(self):
+        s = FarmState()
+        for deck in range(PACKETS_PER_DAY):
+            self.assertIsNotNone(rules.claim_packet(s, day=5, deck_id=deck))
+        self.assertIsNone(rules.claim_packet(s, day=5, deck_id=99))
+
+    def test_undo_takes_packet_back_and_reopens_it(self):
+        s = FarmState()
+        rules.claim_packet(s, day=5, deck_id=1, revlog_id=42)
+        for reward in [r for r in s.recent_rewards if r["rid"] == 42]:
+            rules.revoke_reward(s, reward)
+        self.assertEqual(s.bag, {})
+        self.assertEqual(s.stats.get("packets"), 0)
+        self.assertIsNotNone(rules.claim_packet(s, day=5, deck_id=1))
+
+    def test_packet_state_survives_save(self):
+        s = FarmState()
+        rules.claim_packet(s, day=5, deck_id=1)
+        again = FarmState.from_dict(s.to_dict())
+        self.assertIsNone(rules.claim_packet(again, day=5, deck_id=1))
 
 
 class BoardTests(unittest.TestCase):

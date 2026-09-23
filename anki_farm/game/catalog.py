@@ -33,6 +33,15 @@ RARITIES: dict[str, tuple[str, float]] = {
 MATURE_IVL = 21
 MATURE_RARITY_BOOST = 1.5
 
+# Daily seed packet for clearing a deck: PACKET_SIZE seeds, the last one
+# guaranteed PACKET_GUARANTEED_RARITY or better. A deck only pays out once a
+# day, only after PACKET_MIN_REVIEWS reviews in it that day (so a tiny deck
+# can't be farmed), and at most PACKETS_PER_DAY packets are given per day.
+PACKET_SIZE = 5
+PACKET_GUARANTEED_RARITY = "rare"
+PACKET_MIN_REVIEWS = 10
+PACKETS_PER_DAY = 3
+
 
 @dataclass(frozen=True)
 class Species:

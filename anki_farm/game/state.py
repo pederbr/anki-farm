@@ -36,8 +36,11 @@ class FarmState:
     # species id -> highest tier ever reached
     almanac: dict[str, int] = field(default_factory=dict)
     stats: dict[str, int] = field(default_factory=dict)
-    # [{"rid": revlog id, "species": str, "tile": "x,y" | None}, ...]
+    # [{"rid": revlog id, "species": str, "tile": "x,y" | None,
+    #   "packet": deck id (only for seeds from a daily packet)}, ...]
     recent_rewards: list[dict[str, Any]] = field(default_factory=list)
+    # {"day": scheduler day number, "decks": [deck ids that paid a packet]}
+    daily: dict[str, Any] = field(default_factory=dict)
 
     # ---- helpers -------------------------------------------------------
 
@@ -78,6 +81,7 @@ class FarmState:
             "almanac": dict(self.almanac),
             "stats": dict(self.stats),
             "recent": list(self.recent_rewards),
+            "daily": dict(self.daily),
         }
 
     @classmethod
@@ -103,6 +107,7 @@ class FarmState:
         }
         state.stats = {k: int(n) for k, n in (data.get("stats") or {}).items()}
         state.recent_rewards = list(data.get("recent") or [])[-RECENT_REWARDS_KEPT:]
+        state.daily = dict(data.get("daily") or {})
         return state
 
 

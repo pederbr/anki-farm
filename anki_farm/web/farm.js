@@ -12,10 +12,89 @@
   let cat = null; // catalog: species, tier names, ...
   let state = null;
   let autoPlant = false;
+  let soundOn = true;
   let selectedSeed = null; // species picked in the bag for click-to-plant
   let press = null; // pointer down, maybe about to drag
   let drag = null; // active drag
   const el = {};
+
+  // ---- sound --------------------------------------------------------------
+  // Tiny chiptune synth on WebAudio: square/triangle blips, no audio files.
+
+  const Sfx = (() => {
+    let ctx = null;
+    const audio = () => {
+      if (!ctx) {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return null;
+        ctx = new AC();
+      }
+      if (ctx.state === "suspended") ctx.resume();
+      return ctx;
+    };
+    const midi = (n) => 440 * Math.pow(2, (n - 69) / 12);
+
+    // one note: midi number, start offset (s), length (s)
+    function note(n, at, len, { type = "square", vol = 0.06, slideTo = null } = {}) {
+      const a = audio();
+      if (!a) return;
+      const t = a.currentTime + at;
+      const osc = a.createOscillator();
+      const gain = a.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(midi(n), t);
+      if (slideTo !== null) osc.frequency.exponentialRampToValueAtTime(midi(slideTo), t + len);
+      gain.gain.setValueAtTime(vol, t);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + len);
+      osc.connect(gain).connect(a.destination);
+      osc.start(t);
+      osc.stop(t + len + 0.02);
+    }
+
+    const sounds = {
+      pick: () => note(84, 0, 0.04, { vol: 0.03 }),
+      plant: () => {
+        note(60, 0, 0.06, { type: "triangle", vol: 0.12 });
+        note(67, 0.05, 0.08, { type: "triangle", vol: 0.1 });
+      },
+      move: () => note(64, 0, 0.05, { type: "triangle", vol: 0.08 }),
+      swap: () => {
+        note(67, 0, 0.05, { type: "triangle", vol: 0.08 });
+        note(62, 0.05, 0.05, { type: "triangle", vol: 0.08 });
+      },
+      // higher tiers merge with a higher, longer arpeggio
+      merge: (tier) => {
+        const root = 60 + tier * 2;
+        [0, 4, 7, 12].slice(0, Math.min(2 + tier, 4)).forEach((iv, i) => note(root + iv, i * 0.06, 0.1));
+      },
+      discover: () => [79, 84, 88, 91].forEach((n, i) => note(n, 0.25 + i * 0.07, 0.12, { vol: 0.04 })),
+      golden: () => {
+        [72, 76, 79, 84].forEach((n, i) => note(n, i * 0.09, 0.14));
+        note(88, 0.4, 0.5, { vol: 0.05 });
+        note(76, 0.4, 0.5, { type: "triangle", vol: 0.08 });
+      },
+      reward: () => {
+        note(83, 0, 0.06, { vol: 0.04 });
+        note(88, 0.06, 0.18, { vol: 0.04 });
+      },
+      packet: () =>
+        [72, 72, 76, 79, 76, 79, 84].forEach((n, i) =>
+          note(n, i * 0.08, i === 6 ? 0.35 : 0.08, { vol: 0.05 }),
+        ),
+      error: () => note(45, 0, 0.12, { vol: 0.05, slideTo: 38 }),
+    };
+
+    return {
+      play(name, arg) {
+        if (!soundOn || !sounds[name]) return;
+        try {
+          sounds[name](arg);
+        } catch (e) {
+          /* audio is a nicety; never break the game over it */
+        }
+      },
+    };
+  })();
 
   // ---- sprites ------------------------------------------------------------
 
@@ -70,6 +149,7 @@
         <header class="bar">
           <h1>Anki Farm</h1>
           <div class="stats"></div>
+          <button class="sound" title="Sound effects">♪ Sound</button>
           <label class="toggle" title="Plant new seeds straight onto empty tiles">
             <input type="checkbox" class="auto"> Auto-plant
           </label>
@@ -90,7 +170,7 @@
         </div>
         <div class="toast"></div>
       </div>`;
-    for (const name of ["stats", "board", "info", "bag", "count", "toast"]) {
+    for (const name of ["stats", "board", "info", "bag", "count", "toast", "sound"]) {
       el[name] = root.querySelector(`.${name}`);
     }
     el.bagList = root.querySelector(".bag-list");
@@ -99,6 +179,11 @@
 
     el.auto.addEventListener("change", () => send({ op: "auto_plant", value: el.auto.checked }));
     el.plantAll.addEventListener("click", () => send({ op: "plant_all" }));
+    el.sound.addEventListener("click", () => {
+      soundOn = !soundOn;
+      Sfx.play("pick");
+      send({ op: "sound", value: soundOn });
+    });
     document.addEventListener("pointerdown", onPointerDown);
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
@@ -112,6 +197,7 @@
   function render(payload) {
     state = payload.state;
     autoPlant = payload.autoPlant;
+    soundOn = payload.sound !== false;
     if (selectedSeed && !state.bag[selectedSeed]) selectedSeed = null;
     cancelDrag();
     drawStats();
@@ -131,6 +217,7 @@
       `<span>Golden <b>${s.golden_crops || 0}</b></span>` +
       `<span>Almanac <b>${found}/${total}</b></span>`;
     el.auto.checked = autoPlant;
+    el.sound.classList.toggle("off", !soundOn);
   }
 
   function drawBoard() {
@@ -204,19 +291,45 @@
       const p = state.tiles[ev.tile];
       if (p) {
         setInfo(describe(p[0], p[1]));
-        if (ev.new) toast(`New in the almanac: ${cat.species[p[0]].name} – ${cat.tierNames[p[1]]}!`);
-        else if (p[1] === cat.maxTier) toast(`Golden ${cat.species[p[0]].name}!`);
+        if (p[1] === cat.maxTier) {
+          Sfx.play("golden");
+          toast(`Golden ${cat.species[p[0]].name}!`, true);
+        } else {
+          Sfx.play("merge", p[1]);
+          if (ev.new) {
+            Sfx.play("discover");
+            toast(`New in the almanac: ${cat.species[p[0]].name} – ${cat.tierNames[p[1]]}!`);
+          }
+        }
       }
-    } else if ((ev.kind === "plant" || ev.kind === "move") && tileEl) {
-      tileEl.classList.add("plant-in");
+    } else if (ev.kind === "plant" || ev.kind === "move" || ev.kind === "swap") {
+      if (tileEl) tileEl.classList.add("plant-in");
+      Sfx.play(ev.kind);
     } else if (ev.kind === "reward") {
       const s = cat.species[ev.species];
+      Sfx.play("reward");
       toast(`+1 ${s.name} seed`);
       if (tileEl) tileEl.classList.add("plant-in");
-      const item = el.bagList.querySelector(`[data-species="${ev.species}"]`);
-      if (!ev.tile && item) item.animate([{ background: "var(--gold)" }, { background: "transparent" }], 600);
+      flashBag(ev.tile ? [] : [ev.species]);
+    } else if (ev.kind === "packet") {
+      Sfx.play("packet");
+      const names = ev.species.map((sp) => cat.species[sp].name).join(", ");
+      toast(`Deck cleared! Seed packet: ${names}`, true);
+      flashBag(ev.species);
     } else if (ev.kind === "plant_all" && ev.count) {
+      Sfx.play("plant");
       el.board.querySelectorAll(".plant.t1").forEach((p) => p.classList.add("plant-in"));
+    } else if (ev.kind === "to_bag") {
+      Sfx.play("move");
+    } else if (ev.kind === "error") {
+      Sfx.play("error");
+    }
+  }
+
+  function flashBag(species) {
+    for (const sp of new Set(species)) {
+      const item = el.bagList.querySelector(`[data-species="${sp}"]`);
+      if (item) item.animate([{ background: "var(--gold)" }, { background: "transparent" }], 700);
     }
   }
 
@@ -236,11 +349,12 @@
   }
 
   let toastTimer = null;
-  function toast(text) {
+  function toast(text, big = false) {
     el.toast.textContent = text;
+    el.toast.classList.toggle("big", big);
     el.toast.classList.add("show");
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => el.toast.classList.remove("show"), 1800);
+    toastTimer = setTimeout(() => el.toast.classList.remove("show"), big ? 3200 : 1800);
   }
 
   // ---- input: click and drag ----------------------------------------------
@@ -294,6 +408,7 @@
     ghost.style.top = `${p.y}px`;
     document.body.appendChild(ghost);
     drag.ghost = ghost;
+    Sfx.play("pick");
     // highlight where this can go
     for (const tile of el.board.children) {
       const t = state.tiles[tile.dataset.key];

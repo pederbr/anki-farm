@@ -21,6 +21,8 @@ from game.view import catalog_json, state_json  # noqa: E402
 
 state = FarmState()
 auto_plant = False
+sound = True
+day = 1
 
 
 def load_deck_panel():
@@ -74,6 +76,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 <div style="position:fixed;bottom:6px;left:6px;display:flex;gap:6px;font:13px sans-serif">
 <button onclick="call('dev:review')">Review a card</button>
 <button onclick="call('dev:review10')">Review 10</button>
+<button onclick="call('dev:packet')">Clear deck (packet)</button>
 <button onclick="call('dev:undo')">Undo last review</button>
 <button onclick="call('dev:showcase')">Showcase</button>
 <button onclick="call('dev:reset')">Reset</button></div>
@@ -81,11 +84,11 @@ window.addEventListener("DOMContentLoaded", async () => {
 
 
 def payload(event=None):
-    return {"state": state_json(state), "autoPlant": auto_plant, "event": event}
+    return {"state": state_json(state), "autoPlant": auto_plant, "sound": sound, "event": event}
 
 
 def handle(cmd: str):
-    global state, auto_plant, revlog_id
+    global state, auto_plant, sound, revlog_id, day
     if cmd == "dev:state":
         return payload()
     if cmd in ("dev:review", "dev:review10"):
@@ -96,6 +99,11 @@ def handle(cmd: str):
             tile = rules.grant_seed(state, sp, revlog_id=revlog_id, auto_plant=auto_plant)
             ev = {"kind": "reward", "species": sp, "tile": tile}
         return payload(ev)
+    if cmd == "dev:packet":
+        revlog_id += 1
+        day += 1  # a new day each click so the packet is always claimable
+        seeds = rules.claim_packet(state, day=day, deck_id=1, revlog_id=revlog_id, auto_plant=auto_plant)
+        return payload({"kind": "packet", "species": seeds})
     if cmd == "dev:undo":
         if state.recent_rewards:
             rules.revoke_reward(state, state.recent_rewards[-1])
@@ -120,6 +128,9 @@ def handle(cmd: str):
     try:
         if op == "auto_plant":
             auto_plant = bool(msg["value"])
+            return payload()
+        if op == "sound":
+            sound = bool(msg["value"])
             return payload()
         if op == "move":
             return payload(rules.move(state, msg["src"], msg["dst"]).to_dict())
