@@ -1,0 +1,209 @@
+"""Game rules. Every change to FarmState goes through here.
+
+Functions raise GameError for moves that aren't allowed; the UI simply
+re-renders the current state when that happens.
+"""
+
+from __future__ import annotations
+
+import random
+from dataclasses import dataclass
+from typing import Any
+
+from .catalog import (
+    MATURE_RARITY_BOOST,
+    MAX_TIER,
+    RARITIES,
+    SPECIES_BY_ID,
+    species_in_rarity,
+)
+from .state import RECENT_REWARDS_KEPT, FarmState, Plant
+
+
+class GameError(Exception):
+    pass
+
+
+@dataclass
+class MoveResult:
+    kind: str  # "move" | "swap" | "merge" | "plant"
+    tile: str
+    new_discovery: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"kind": self.kind, "tile": self.tile, "new": self.new_discovery}
+
+
+# ---- rewards -----------------------------------------------------------
+
+
+def roll_rarity(rng: random.Random, mature: bool = False) -> str:
+    weights = []
+    for rarity, (_name, weight) in RARITIES.items():
+        if mature and rarity != "common":
+            weight *= MATURE_RARITY_BOOST
+        weights.append(weight)
+    return rng.choices(list(RARITIES), weights=weights)[0]
+
+
+def roll_species(rng: random.Random, mature: bool = False) -> str:
+    rarity = roll_rarity(rng, mature)
+    return rng.choice(species_in_rarity(rarity)).id
+
+
+def grant_seed(
+    state: FarmState,
+    species: str,
+    *,
+    revlog_id: int | None = None,
+    auto_plant: bool = False,
+    rng: random.Random | None = None,
+) -> str | None:
+    """Give the player one seed. Returns the tile it was planted on, or None
+    if it went into the bag."""
+    _check_species(species)
+    tile = None
+    empty = state.empty_tiles()
+    if auto_plant and empty:
+        tile = (rng or random).choice(empty)
+        state.tiles[tile] = Plant(species, 1)
+    else:
+        state.bag[species] = state.bag.get(species, 0) + 1
+    state.discover(species, 1)
+    state.bump_stat("seeds_earned")
+    if revlog_id is not None:
+        state.recent_rewards.append({"rid": revlog_id, "species": species, "tile": tile})
+        del state.recent_rewards[:-RECENT_REWARDS_KEPT]
+    return tile
+
+
+def revoke_reward(state: FarmState, reward: dict[str, Any]) -> bool:
+    """Take back a seed after its review was undone. Best effort: if the seed
+    has already been merged away there is nothing left to take."""
+    species = reward["species"]
+    tile = reward.get("tile")
+    removed = False
+    if tile and state.tiles.get(tile) == Plant(species, 1):
+        del state.tiles[tile]
+        removed = True
+    elif state.bag.get(species, 0) > 0:
+        state.bag[species] -= 1
+        if not state.bag[species]:
+            del state.bag[species]
+        removed = True
+    else:
+        for key, plant in list(state.tiles.items()):
+            if plant == Plant(species, 1):
+                del state.tiles[key]
+                removed = True
+                break
+    if removed:
+        state.bump_stat("seeds_earned", -1)
+    if reward in state.recent_rewards:
+        state.recent_rewards.remove(reward)
+    return removed
+
+
+# ---- player actions ----------------------------------------------------
+
+
+def plant_from_bag(state: FarmState, species: str, tile: str) -> MoveResult:
+    _check_tile(state, tile)
+    if state.bag.get(species, 0) <= 0:
+        raise GameError(f"no {species} seeds in the bag")
+    target = state.tiles.get(tile)
+    seed = Plant(species, 1)
+    if target is None:
+        _take_from_bag(state, species)
+        state.tiles[tile] = seed
+        return MoveResult("plant", tile)
+    if target == seed:
+        # dropping a seed on an identical seed merges straight away
+        _take_from_bag(state, species)
+        return _merge_into(state, tile, target)
+    raise GameError("tile is occupied")
+
+
+def plant_all(state: FarmState, rng: random.Random | None = None) -> int:
+    """Fill empty tiles from the bag, rarest species first. Returns count."""
+    rng = rng or random
+    empty = state.empty_tiles()
+    rng.shuffle(empty)
+    rarity_rank = {r: i for i, r in enumerate(RARITIES)}
+    order = sorted(
+        state.bag, key=lambda s: -rarity_rank[SPECIES_BY_ID[s].rarity]
+    )
+    planted = 0
+    for species in order:
+        while state.bag.get(species, 0) > 0 and empty:
+            _take_from_bag(state, species)
+            state.tiles[empty.pop()] = Plant(species, 1)
+            planted += 1
+    return planted
+
+
+def move(state: FarmState, src: str, dst: str) -> MoveResult:
+    """Drag a plant from src to dst: move, merge, or swap."""
+    _check_tile(state, src)
+    _check_tile(state, dst)
+    if src == dst:
+        raise GameError("same tile")
+    plant = state.tiles.get(src)
+    if plant is None:
+        raise GameError("nothing to move")
+    target = state.tiles.get(dst)
+    if target is None:
+        state.tiles[dst] = state.tiles.pop(src)
+        return MoveResult("move", dst)
+    if can_merge(plant, target):
+        del state.tiles[src]
+        return _merge_into(state, dst, target)
+    state.tiles[src], state.tiles[dst] = target, plant
+    return MoveResult("swap", dst)
+
+
+def can_merge(a: Plant, b: Plant) -> bool:
+    return a == b and a.tier < MAX_TIER
+
+
+def return_to_bag(state: FarmState, tile: str) -> None:
+    """Pick a seed back up off the board (only tier-1 plants)."""
+    _check_tile(state, tile)
+    plant = state.tiles.get(tile)
+    if plant is None or plant.tier != 1:
+        raise GameError("only seeds can go back in the bag")
+    del state.tiles[tile]
+    state.bag[plant.species] = state.bag.get(plant.species, 0) + 1
+
+
+# ---- internals ---------------------------------------------------------
+
+
+def _merge_into(state: FarmState, tile: str, target: Plant) -> MoveResult:
+    merged = Plant(target.species, target.tier + 1)
+    state.tiles[tile] = merged
+    state.bump_stat("merges")
+    new = state.discover(merged.species, merged.tier)
+    if merged.tier == MAX_TIER:
+        state.bump_stat("golden_crops")
+    return MoveResult("merge", tile, new_discovery=new)
+
+
+def _take_from_bag(state: FarmState, species: str) -> None:
+    state.bag[species] -= 1
+    if not state.bag[species]:
+        del state.bag[species]
+
+
+def _check_species(species: str) -> None:
+    if species not in SPECIES_BY_ID:
+        raise GameError(f"unknown species {species!r}")
+
+
+def _check_tile(state: FarmState, key: str) -> None:
+    try:
+        ok = state.in_bounds(key)
+    except (ValueError, AttributeError):
+        ok = False
+    if not ok:
+        raise GameError(f"bad tile {key!r}")
