@@ -33,15 +33,16 @@
   --muted: #b19f84;
 }
 
+/* The page scrolls normally, so a short window never hides part of the
+   board; only the seed bag keeps its own scrollbar (see .bag). */
 html,
 body {
   margin: 0;
   padding: 0;
-  height: 100%;
-  overflow: hidden;
 }
 
 body {
+  min-height: 100vh;
   background-color: var(--grass);
   background-image:
     radial-gradient(var(--grass-dark) 1.5px, transparent 1.5px),
@@ -54,14 +55,10 @@ body {
   -webkit-user-select: none;
 }
 
-#farm-root {
-  height: 100%;
-}
-
 .farm {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  min-height: 100vh;
   box-sizing: border-box;
   padding: 12px 16px 16px;
   gap: 12px;
@@ -100,24 +97,6 @@ body {
 .stats b {
   font-weight: normal;
   color: var(--gold);
-}
-
-.sound {
-  margin-left: auto;
-  font: inherit;
-  font-size: 20px;
-  line-height: 1;
-  color: #fff6e0;
-  background: var(--wood-dark);
-  border: 0;
-  border-radius: 4px;
-  padding: 3px 8px 1px;
-  cursor: pointer;
-}
-
-.sound.off {
-  opacity: 0.55;
-  text-decoration: line-through;
 }
 
 .toggle {
@@ -165,7 +144,6 @@ body {
   flex: 1;
   display: flex;
   gap: 16px;
-  min-height: 0;
   align-items: flex-start;
   justify-content: center;
 }
@@ -398,7 +376,10 @@ body {
 .bag {
   width: 230px;
   flex: none;
-  max-height: 100%;
+  /* a full bag scrolls inside itself and stays next to the board */
+  position: sticky;
+  top: 12px;
+  max-height: calc(100vh - 24px);
   display: flex;
   flex-direction: column;
   background: var(--paper);
@@ -579,18 +560,272 @@ body {
   transform: translate(-50%, 0);
 }
 
+/* ---- pages: Almanac / Settings / How to play (own windows) ------------ */
+
+body.mode-page {
+  background: var(--paper);
+  background-image: none;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 16px 20px 24px;
+  font-size: 20px;
+  line-height: 1.15;
+}
+
+.panel-lead,
+.panel-note {
+  margin: 0 0 8px;
+  color: var(--muted);
+}
+
+.panel-note {
+  margin: 12px 0 0;
+  font-size: 17px;
+}
+
+.progress {
+  height: 6px;
+  margin-bottom: 12px;
+  background: var(--paper-dark);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progress > b {
+  display: block;
+  height: 100%;
+  background: var(--gold);
+}
+
+/* almanac: one row per species, one column per tier */
+.alm-head,
+.alm-row {
+  display: grid;
+  grid-template-columns: minmax(110px, 1fr) repeat(7, 40px);
+  gap: 4px;
+  align-items: center;
+}
+
+.alm-head {
+  color: var(--muted);
+  font-size: 16px;
+  text-align: center;
+  padding: 0 6px 4px;
+}
+
+.alm-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.alm-row {
+  padding: 2px 6px;
+  border-radius: 4px;
+  border-left: 4px solid var(--rc);
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.night-mode .alm-row {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.alm-name b {
+  display: block;
+  font-weight: normal;
+}
+
+.alm-name small {
+  font-size: 15px;
+  color: var(--muted);
+}
+
+.unknown .alm-name b {
+  color: var(--muted);
+}
+
+.alm-cell,
+.tier-step {
+  --sprite: 32px;
+  display: flex;
+  justify-content: center;
+}
+
+.alm-cell.locked .sprite {
+  filter: brightness(0);
+  opacity: 0.18;
+}
+
+.alm-cell.t7:not(.locked) .sprite,
+.tier-step.t7 .sprite {
+  filter: grayscale(1) sepia(1) saturate(6) hue-rotate(2deg) brightness(1.25) contrast(1.15)
+    drop-shadow(0 0 3px rgba(255, 200, 40, 0.8));
+}
+
+/* settings */
+.setting {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 2px dashed var(--paper-dark);
+}
+
+.setting > div {
+  flex: 1;
+}
+
+.setting b {
+  display: block;
+  font-weight: normal;
+  font-size: 22px;
+}
+
+.setting small {
+  display: block;
+  font-size: 17px;
+  color: var(--muted);
+}
+
+.setting .toggle {
+  margin: 0;
+}
+
+.setting .toggle input {
+  background: var(--paper-dark);
+}
+
+.setting .toggle input:checked {
+  background: var(--green);
+}
+
+.num {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 20px;
+}
+
+.num input {
+  width: 56px;
+  font: inherit;
+  font-size: 20px;
+  padding: 2px 6px 0;
+  color: var(--ink);
+  background: var(--paper-dark);
+  border: 2px solid var(--wood-light);
+  border-radius: 4px;
+}
+
+/* how to play */
+.howto h3 {
+  margin: 14px 0 6px;
+  font-size: 24px;
+  font-weight: normal;
+  color: var(--wood);
+}
+
+.night-mode .howto h3 {
+  color: var(--wood-light);
+}
+
+.howto h3:first-child {
+  margin-top: 0;
+}
+
+.howto ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.howto li {
+  margin-bottom: 6px;
+}
+
+.howto b {
+  font-weight: normal;
+  color: var(--green-dark);
+}
+
+.night-mode .howto b {
+  color: var(--green);
+}
+
+.howto p {
+  margin: 0;
+}
+
+.tier-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0 4px;
+}
+
+.tier-step {
+  flex-direction: column;
+  align-items: center;
+  width: 76px;
+  text-align: center;
+}
+
+.tier-step small {
+  font-size: 15px;
+  line-height: 1;
+  color: var(--muted);
+}
+
+.rarity {
+  display: grid;
+  grid-template-columns: 110px 60px 1fr;
+  gap: 8px;
+  align-items: baseline;
+  padding: 3px 0 3px 8px;
+  border-left: 4px solid var(--rc);
+  margin-bottom: 4px;
+}
+
+.rarity b {
+  font-weight: normal;
+  color: var(--ink);
+}
+
+.rarity span {
+  color: var(--muted);
+}
+
+.rarity small {
+  font-size: 17px;
+}
+
 /* narrow windows: stack the bag under the board */
 @media (max-width: 700px) {
   .main {
     flex-direction: column;
     align-items: center;
-    overflow-y: auto;
+    /* stack from the top: centred overflow would push the board off-screen */
+    justify-content: flex-start;
   }
   .bag {
+    position: static;
     width: 100%;
     max-width: 420px;
+    max-height: none;
   }
-  .sound {
-    margin-left: 0;
+}
+
+/* very narrow windows: 3x sprites instead of 4x so the board still fits */
+@media (max-width: 440px) {
+  :root {
+    --tile: 56px;
+    --sprite: 48px;
+  }
+  .farm {
+    padding: 8px;
   }
 }

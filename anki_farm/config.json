@@ -4,5 +4,6 @@
   "min_answer_seconds": 1.5,
   "show_tooltips": true,
   "show_almanac_on_deck_list": true,
-  "almanac_collapsed": false
+  "almanac_collapsed": false,
+  "seen_howto": false
 }

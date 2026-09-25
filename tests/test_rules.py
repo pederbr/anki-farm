@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "anki_farm"))
 
-from game import rules  # noqa: E402
+from game import rules, settings  # noqa: E402
 from game.catalog import MAX_TIER, PACKET_SIZE, PACKETS_PER_DAY, SPECIES_BY_ID  # noqa: E402
 from game.state import FarmState, Plant  # noqa: E402
 
@@ -241,6 +241,24 @@ class BoardTests(unittest.TestCase):
                 by_tier[p.tier] = key
         self.assertEqual(list(s.tiles.values()), [Plant("wheat", MAX_TIER)])
         self.assertEqual(s.stats["golden_crops"], 1)
+
+
+class SettingsTests(unittest.TestCase):
+    def test_defaults_filled_in(self):
+        current = settings.current({"sound": False})
+        self.assertFalse(current["sound"])
+        self.assertEqual(current["min_answer_seconds"], 1.5)
+
+    def test_bad_input_rejected_or_clamped(self):
+        with self.assertRaises(ValueError):
+            settings.clean("seen_howto", True)  # not user-editable from the panel
+        with self.assertRaises(ValueError):
+            settings.clean("sound", "yes")
+        with self.assertRaises(ValueError):
+            settings.clean("min_answer_seconds", "abc")
+        self.assertEqual(settings.clean("min_answer_seconds", 99), 10.0)
+        self.assertEqual(settings.clean("min_answer_seconds", -3), 0.0)
+        self.assertEqual(settings.clean("min_answer_seconds", "2.25"), 2.2)
 
 
 class SerializationTests(unittest.TestCase):

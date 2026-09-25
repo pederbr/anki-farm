@@ -17,11 +17,11 @@ sys.path.insert(0, str(ROOT))
 
 from game import rules  # noqa: E402
 from game.state import FarmState  # noqa: E402
+from game import settings as game_settings  # noqa: E402
 from game.view import catalog_json, state_json  # noqa: E402
 
 state = FarmState()
-auto_plant = False
-sound = True
+conf = {}  # stands in for the add-on config
 day = 1
 
 
@@ -69,7 +69,8 @@ async function call(msg) {
 }
 window.pycmd = (m) => { call(m); };
 window.addEventListener("DOMContentLoaded", async () => {
-  AnkiFarm.init(await (await fetch("/catalog")).json());
+  const page = new URLSearchParams(location.search).get("page") || "farm";
+  AnkiFarm.init(await (await fetch("/catalog")).json(), page);
   call("dev:state");
 });
 </script></head><body class="%s"><div id="farm-root"></div>
@@ -79,16 +80,21 @@ window.addEventListener("DOMContentLoaded", async () => {
 <button onclick="call('dev:packet')">Clear deck (packet)</button>
 <button onclick="call('dev:undo')">Undo last review</button>
 <button onclick="call('dev:showcase')">Showcase</button>
-<button onclick="call('dev:reset')">Reset</button></div>
+<button onclick="call('dev:reset')">Reset</button>
+<span>Menu:</span>
+<button onclick="window.open('/?page=almanac', 'almanac', 'width=600,height=680')">Almanac</button>
+<button onclick="window.open('/?page=settings', 'settings', 'width=540,height=500')">Settings…</button>
+<button onclick="window.open('/?page=howto', 'howto', 'width=640,height=700')">How to Play</button></div>
 </body></html>"""
 
 
 def payload(event=None):
-    return {"state": state_json(state), "autoPlant": auto_plant, "sound": sound, "event": event}
+    return {"state": state_json(state), "settings": game_settings.current(conf), "event": event}
 
 
 def handle(cmd: str):
-    global state, auto_plant, sound, revlog_id, day
+    global state, revlog_id, day
+    auto_plant = game_settings.current(conf)["auto_plant"]
     if cmd == "dev:state":
         return payload()
     if cmd in ("dev:review", "dev:review10"):
@@ -126,11 +132,11 @@ def handle(cmd: str):
     msg = json.loads(cmd[len("farm:"):])
     op = msg["op"]
     try:
-        if op == "auto_plant":
-            auto_plant = bool(msg["value"])
-            return payload()
-        if op == "sound":
-            sound = bool(msg["value"])
+        if op == "setting":
+            try:
+                conf[msg["key"]] = game_settings.clean(msg["key"], msg["value"])
+            except ValueError as err:
+                return payload({"kind": "error", "message": str(err)})
             return payload()
         if op == "move":
             return payload(rules.move(state, msg["src"], msg["dst"]).to_dict())
@@ -149,6 +155,11 @@ def handle(cmd: str):
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *a, **kw):
         super().__init__(*a, directory=str(ROOT), **kw)
+
+    def end_headers(self):
+        # always serve fresh files while iterating on the UI
+        self.send_header("Cache-Control", "no-store")
+        super().end_headers()
 
     def _json(self, obj):
         body = json.dumps(obj).encode()
@@ -169,7 +180,7 @@ class Handler(SimpleHTTPRequestHandler):
             return self.wfile.write(body)
         if self.path.startswith("/catalog"):
             return self._json(catalog_json())
-        if self.path in ("/", "/?night"):
+        if self.path == "/" or self.path.startswith("/?"):
             body = (PAGE % ("night-mode" if "night" in self.path else "")).encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")

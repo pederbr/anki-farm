@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from aqt import gui_hooks, mw
-from aqt.qt import QAction, qconnect
+from aqt.qt import QAction, QKeySequence, QMenu, qconnect
 
 from . import deck_panel, farm_dialog, rewards
 
@@ -16,12 +16,34 @@ def _add_toolbar_link(links: list[str], toolbar) -> None:
     )
 
 
+def _add_menu() -> None:
+    """An "Anki Farm" menu in the menu bar (the macOS top bar), before Help."""
+    menu = QMenu("Anki Farm", mw)
+    items = [
+        ("Open Farm", lambda: farm_dialog.open_farm(), "Ctrl+Shift+F"),
+        (None, None, None),
+        ("Almanac", lambda: farm_dialog.open_window("almanac"), None),
+        ("Settings…", lambda: farm_dialog.open_window("settings"), None),
+        ("How to Play", lambda: farm_dialog.open_window("howto"), None),
+    ]
+    for label, callback, shortcut in items:
+        if label is None:
+            menu.addSeparator()
+            continue
+        action = QAction(label, mw)
+        # stop macOS moving "Settings…" into the Anki application menu
+        action.setMenuRole(QAction.MenuRole.NoRole)
+        if shortcut:
+            action.setShortcut(QKeySequence(shortcut))
+        qconnect(action.triggered, callback)
+        menu.addAction(action)
+    mw.form.menubar.insertMenu(mw.form.menuHelp.menuAction(), menu)
+
+
 def _setup() -> None:
     mw.addonManager.setWebExports(__name__, r"web/.*\.(js|css|png|ttf)")
 
-    action = QAction("Anki Farm", mw)
-    qconnect(action.triggered, farm_dialog.open_farm)
-    mw.form.menuTools.addAction(action)
+    _add_menu()
 
     gui_hooks.reviewer_did_answer_card.append(rewards.on_answer)
     gui_hooks.state_did_undo.append(rewards.on_undo)

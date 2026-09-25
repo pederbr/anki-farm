@@ -52,7 +52,7 @@ def panel_html(conf: dict[str, Any]) -> str:
         )
         cards.append(
             f'<div class="afarm-card r-{s.rarity}{"" if best else " unknown"}" '
-            f'title="{html.escape(title)}">'
+            f'title="{html.escape(title)}" onclick="pycmd(\'{MSG_PREFIX}almanac_view\')">'
             f'<div class="afarm-portrait" style="{_portrait_style(s.sheet_index)}"></div>'
             f'<div class="afarm-name">{name}</div>'
             f'<div class="afarm-pips">{pips}</div>'
@@ -98,6 +98,7 @@ def panel_html(conf: dict[str, Any]) -> str:
   gap: 8px; padding: 0 12px 12px;
 }}
 #anki-farm-almanac .afarm-card {{
+  cursor: pointer;
   background: var(--af-card); border-radius: 4px; padding: 6px 4px 5px;
   display: flex; flex-direction: column; align-items: center; gap: 3px;
   border-top: 3px solid var(--rc);
@@ -141,6 +142,8 @@ def on_js_message(handled: tuple[bool, Any], message: str, context: Any) -> tupl
     cmd = message[len(MSG_PREFIX) :]
     if cmd == "open":
         farm_dialog.open_farm()
+    elif cmd == "almanac_view":
+        farm_dialog.open_window("almanac")
     elif cmd.startswith("almanac:"):
         storage.set_addon_config("almanac_collapsed", cmd.endswith("closed"))
     return (True, None)

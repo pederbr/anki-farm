@@ -11,8 +11,11 @@
 
   let cat = null; // catalog: species, tier names, ...
   let state = null;
-  let autoPlant = false;
+  let settings = {};
   let soundOn = true;
+  // which window this page is: "farm", or one of the pages "almanac" |
+  // "settings" | "howto" (each opens in its own window)
+  let view = "farm";
   let selectedSeed = null; // species picked in the bag for click-to-plant
   let press = null; // pointer down, maybe about to drag
   let drag = null; // active drag
@@ -149,10 +152,6 @@
         <header class="bar">
           <h1>Anki Farm</h1>
           <div class="stats"></div>
-          <button class="sound" title="Sound effects">♪ Sound</button>
-          <label class="toggle" title="Plant new seeds straight onto empty tiles">
-            <input type="checkbox" class="auto"> Auto-plant
-          </label>
         </header>
         <div class="main">
           <section class="board-wrap">
@@ -170,20 +169,13 @@
         </div>
         <div class="toast"></div>
       </div>`;
-    for (const name of ["stats", "board", "info", "bag", "count", "toast", "sound"]) {
+    for (const name of ["stats", "board", "info", "bag", "count", "toast"]) {
       el[name] = root.querySelector(`.${name}`);
     }
     el.bagList = root.querySelector(".bag-list");
-    el.auto = root.querySelector(".auto");
     el.plantAll = root.querySelector(".plant-all");
 
-    el.auto.addEventListener("change", () => send({ op: "auto_plant", value: el.auto.checked }));
     el.plantAll.addEventListener("click", () => send({ op: "plant_all" }));
-    el.sound.addEventListener("click", () => {
-      soundOn = !soundOn;
-      Sfx.play("pick");
-      send({ op: "sound", value: soundOn });
-    });
     document.addEventListener("pointerdown", onPointerDown);
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
@@ -196,8 +188,12 @@
 
   function render(payload) {
     state = payload.state;
-    autoPlant = payload.autoPlant;
-    soundOn = payload.sound !== false;
+    settings = payload.settings || {};
+    soundOn = settings.sound !== false;
+    if (view !== "farm") {
+      drawPage(); // almanac/settings/how-to windows just redraw
+      return;
+    }
     if (selectedSeed && !state.bag[selectedSeed]) selectedSeed = null;
     cancelDrag();
     drawStats();
@@ -216,8 +212,6 @@
       `<span>Merges <b>${s.merges || 0}</b></span>` +
       `<span>Golden <b>${s.golden_crops || 0}</b></span>` +
       `<span>Almanac <b>${found}/${total}</b></span>`;
-    el.auto.checked = autoPlant;
-    el.sound.classList.toggle("off", !soundOn);
   }
 
   function drawBoard() {
@@ -279,6 +273,146 @@
     const tile = e.target.closest(".tile");
     const p = tile && state.tiles[tile.dataset.key];
     setInfo(p ? describe(p[0], p[1]) : undefined);
+  }
+
+  // ---- pages: Almanac / Settings / How to play, each in its own window -----
+
+  function buildPage() {
+    const root = document.getElementById("farm-root");
+    root.innerHTML = `<main class="page page-${view}"></main>`;
+    el.page = root.querySelector(".page");
+  }
+
+  function drawPage() {
+    const draw = { almanac: drawAlmanac, settings: drawSettings, howto: drawHowTo }[view];
+    if (!draw || !state) return;
+    const scroll = window.scrollY; // keep the reader's place on live updates
+    el.page.innerHTML = "";
+    el.page.appendChild(draw());
+    window.scrollTo(0, scroll);
+  }
+
+  function html(markup) {
+    const t = document.createElement("template");
+    t.innerHTML = markup.trim();
+    return t.content;
+  }
+
+  function drawAlmanac() {
+    const found = Object.values(state.almanac).reduce((a, b) => a + b, 0);
+    const total = cat.almanacOrder.length * cat.maxTier;
+    const frag = html(`
+      <p class="panel-lead">Every plant and tier you've grown. ${found}/${total} discovered.</p>
+      <div class="progress"><b style="width:${(100 * found) / total}%"></b></div>
+      <div class="alm-head"><span></span>${Array.from({ length: cat.maxTier }, (_, i) =>
+        `<span title="${cat.tierNames[i + 1]}">${i + 1}</span>`).join("")}</div>
+      <div class="alm-rows"></div>`);
+    const rows = frag.querySelector(".alm-rows");
+    for (const id of cat.almanacOrder) {
+      const sp = cat.species[id];
+      const best = state.almanac[id] || 0;
+      const row = document.createElement("div");
+      row.className = `alm-row r-${sp.rarity}` + (best ? "" : " unknown");
+      row.appendChild(
+        html(`<div class="alm-name"><b>${best ? sp.name : "???"}</b><small>${cat.rarities[sp.rarity]}</small></div>`),
+      );
+      for (let tier = 1; tier <= cat.maxTier; tier++) {
+        const cell = document.createElement("div");
+        const known = tier <= best;
+        cell.className = `alm-cell t${tier}` + (known ? "" : " locked");
+        cell.title = known ? `${sp.name} – ${cat.tierNames[tier]}` : `${cat.tierNames[tier]} – not grown yet`;
+        cell.appendChild(spriteEl(id, tier));
+        row.appendChild(cell);
+      }
+      rows.appendChild(row);
+    }
+    return frag;
+  }
+
+  const SETTING_INFO = [
+    ["auto_plant", "Auto-plant", "New seeds go straight onto a random empty tile instead of the Seed Bag."],
+    ["sound", "Sound effects", "Retro blips in the farm window. Reviews always stay silent."],
+    ["show_tooltips", "Review messages", "Show a short “🌱 seed” message in Anki after a rewarded review."],
+    ["show_almanac_on_deck_list", "Almanac on deck list", "Show the Almanac panel under your decks."],
+    ["min_answer_seconds", "Minimum answer time", "Answers faster than this earn nothing, so clicking through cards doesn't pay."],
+  ];
+
+  function drawSettings() {
+    const frag = html(`<div class="settings"></div>`);
+    const list = frag.querySelector(".settings");
+    for (const [key, label, help] of SETTING_INFO) {
+      const value = settings[key];
+      const control =
+        typeof value === "boolean"
+          ? `<label class="toggle"><input type="checkbox" data-key="${key}" ${value ? "checked" : ""}></label>`
+          : `<label class="num"><input type="number" data-key="${key}" min="0" max="10" step="0.5" value="${value}"> s</label>`;
+      list.appendChild(
+        html(`<div class="setting"><div><b>${label}</b><small>${help}</small></div>${control}</div>`),
+      );
+    }
+    list.addEventListener("change", (e) => {
+      const input = e.target.closest("input[data-key]");
+      if (!input) return;
+      const value = input.type === "checkbox" ? input.checked : Number(input.value);
+      if (input.dataset.key === "sound") soundOn = value;
+      Sfx.play("pick");
+      setSetting(input.dataset.key, value);
+    });
+    list.appendChild(html(`<p class="panel-note">Settings are saved on this computer only.</p>`));
+    return frag;
+  }
+
+  function setSetting(key, value) {
+    send({ op: "setting", key, value });
+  }
+
+  function drawHowTo() {
+    const r = cat.rules;
+    const pct = (w) => `${w}%`;
+    const tiers = Array.from({ length: cat.maxTier }, (_, i) => i + 1);
+    const frag = html(`
+      <div class="howto">
+        <h3>Earn seeds by studying</h3>
+        <ul>
+          <li>Every time you <b>complete a card</b> you get one random seed: a passed review, or a new card graduating from learning. Learning steps and relearning don't count yet — the seed comes when the card is done.</li>
+          <li>The answer button doesn't matter. Again, Hard, Good and Easy are all worth the same, so play never pushes you to answer differently.</li>
+          <li>Answers quicker than your <i>minimum answer time</i> (Anki Farm menu → Settings) earn nothing.</li>
+          <li>Mature cards (interval of ${r.matureIvl}+ days) roll rarer seeds more often.</li>
+          <li><b>Studying on your phone?</b> Those reviews earn seeds too. They're paid out here after you sync (up to ${r.catchUpDays} days back).</li>
+          <li><b>Seed packet:</b> clear everything due in a deck (at least ${r.packetMinReviews} reviews in it today) for ${r.packetSize} bonus seeds, one of them ${r.packetRarity} or better. Once per deck per day, up to ${r.packetsPerDay} a day.</li>
+          <li>Undo a review and its seed goes back.</li>
+        </ul>
+        <h3>Plant and merge</h3>
+        <ul>
+          <li>New seeds land in the <b>Seed Bag</b>. Drag one onto the soil, or click a seed and then a tile. <b>Plant all</b> fills every empty tile.</li>
+          <li>Drag a plant onto an <b>identical</b> plant (same kind, same tier) to merge them into the next tier. Tiles you can merge onto glow gold while you drag.</li>
+          <li>Drag onto an empty tile to move, or onto a different plant to swap. Seeds can be dragged back into the bag.</li>
+        </ul>
+        <div class="tier-strip"></div>
+        <h3>Rarity</h3>
+        <div class="rarity-list"></div>
+        <h3>The Almanac</h3>
+        <p>Every plant and tier you grow is recorded in the Almanac (Anki Farm menu → Almanac, or the panel under your decks). Can you grow a golden crop of every kind?</p>
+      </div>`);
+    const strip = frag.querySelector(".tier-strip");
+    for (const tier of tiers) {
+      const item = document.createElement("div");
+      item.className = `tier-step t${tier}`;
+      item.appendChild(spriteEl("wheat", tier));
+      item.appendChild(html(`<small>${tier}. ${cat.tierNames[tier]}</small>`));
+      strip.appendChild(item);
+    }
+    const rl = frag.querySelector(".rarity-list");
+    for (const [rarity, weight] of Object.entries(r.dropWeights)) {
+      const names = cat.almanacOrder
+        .filter((id) => cat.species[id].rarity === rarity)
+        .map((id) => (state.almanac[id] ? cat.species[id].name : "???"))
+        .join(", ");
+      rl.appendChild(
+        html(`<div class="rarity r-${rarity}"><b>${cat.rarities[rarity]}</b><span>${pct(weight)}</span><small>${names}</small></div>`),
+      );
+    }
+    return frag;
   }
 
   // ---- events from Python -------------------------------------------------
@@ -470,9 +604,12 @@
   // ---- public API ---------------------------------------------------------
 
   window.AnkiFarm = {
-    init(catalog) {
+    init(catalog, page = "farm") {
       cat = catalog;
-      build();
+      view = page;
+      document.body.classList.add(view === "farm" ? "mode-farm" : "mode-page");
+      if (view === "farm") build();
+      else buildPage();
     },
     render,
   };

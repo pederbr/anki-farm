@@ -4,8 +4,20 @@ from __future__ import annotations
 
 from typing import Any
 
-from .catalog import ALMANAC_ORDER, MAX_TIER, RARITIES, SPECIES, TIER_NAMES
-from .state import FarmState
+from .catalog import (
+    ALMANAC_ORDER,
+    MATURE_IVL,
+    MATURE_RARITY_BOOST,
+    MAX_TIER,
+    PACKET_GUARANTEED_RARITY,
+    PACKET_MIN_REVIEWS,
+    PACKET_SIZE,
+    PACKETS_PER_DAY,
+    RARITIES,
+    SPECIES,
+    TIER_NAMES,
+)
+from .state import CATCH_UP_DAYS, FarmState
 
 
 def catalog_json() -> dict[str, Any]:
@@ -18,6 +30,17 @@ def catalog_json() -> dict[str, Any]:
             for s in SPECIES
         },
         "almanacOrder": [s.id for s in ALMANAC_ORDER],
+        # numbers quoted by the How to play panel, so it never goes stale
+        "rules": {
+            "dropWeights": {k: w for k, (_name, w) in RARITIES.items()},
+            "matureIvl": MATURE_IVL,
+            "matureBoost": MATURE_RARITY_BOOST,
+            "packetSize": PACKET_SIZE,
+            "packetRarity": RARITIES[PACKET_GUARANTEED_RARITY][0],
+            "packetMinReviews": PACKET_MIN_REVIEWS,
+            "packetsPerDay": PACKETS_PER_DAY,
+            "catchUpDays": CATCH_UP_DAYS,
+        },
     }
 
 
