@@ -7,6 +7,7 @@ sent and reports what the player tried to do ("move this onto that").
 from __future__ import annotations
 
 import json
+import os
 from typing import Any
 
 from aqt import mw
@@ -25,6 +26,17 @@ _dialog: FarmDialog | None = None
 
 def web_base() -> str:
     return f"/_addons/{mw.addonManager.addonFromModule(__name__)}/web"
+
+
+def asset_version() -> str:
+    """Changes whenever a web file changes, so web views never show stale
+    cached JS/CSS/sprites (appended to asset URLs as ?v=...)."""
+    web_dir = os.path.join(os.path.dirname(__file__), "web")
+    newest = 0.0
+    for dirpath, _dirs, files in os.walk(web_dir):
+        for name in files:
+            newest = max(newest, os.path.getmtime(os.path.join(dirpath, name)))
+    return str(int(newest))
 
 
 def open_farm() -> None:
@@ -60,12 +72,16 @@ class FarmDialog(QDialog):
         self.setLayout(layout)
         restoreGeom(self, GEOM_KEY, default_size=(820, 640))
 
-        base = web_base()
+        base, v = web_base(), asset_version()
         self.web.stdHtml(
             '<div id="farm-root"></div>',
             head=(
-                f'<link rel="stylesheet" href="{base}/farm.css">'
-                f'<script src="{base}/farm.js" defer></script>'
+                f'<link rel="stylesheet" href="{base}/farm.css?v={v}">'
+                f'<script src="{base}/farm.js?v={v}" defer></script>'
+                # versioned copies of farm.css's relative image URLs
+                f"<style>.sprite{{background-image:url({base}/sprites/crops.png?v={v})}}"
+                f".tile{{background-image:url({base}/sprites/soil.png?v={v})}}"
+                f".tile.alt{{background-image:url({base}/sprites/soil_alt.png?v={v})}}</style>"
             ),
             context=self,
         )

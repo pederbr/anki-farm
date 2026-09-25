@@ -316,6 +316,11 @@
       const names = ev.species.map((sp) => cat.species[sp].name).join(", ");
       toast(`Deck cleared! Seed packet: ${names}`, true);
       flashBag(ev.species);
+    } else if (ev.kind === "catch_up") {
+      Sfx.play("packet");
+      const n = ev.species.length;
+      toast(`+${n} seed${n === 1 ? "" : "s"} from your other devices`, true);
+      flashBag(ev.species);
     } else if (ev.kind === "plant_all" && ev.count) {
       Sfx.play("plant");
       el.board.querySelectorAll(".plant.t1").forEach((p) => p.classList.add("plant-in"));

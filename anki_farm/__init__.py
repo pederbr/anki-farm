@@ -25,6 +25,9 @@ def _setup() -> None:
 
     gui_hooks.reviewer_did_answer_card.append(rewards.on_answer)
     gui_hooks.state_did_undo.append(rewards.on_undo)
+    # reviews done on a phone arrive through sync
+    gui_hooks.profile_did_open.append(rewards.catch_up)
+    gui_hooks.sync_did_finish.append(rewards.catch_up)
     gui_hooks.deck_browser_will_render_content.append(deck_panel.render)
     gui_hooks.webview_did_receive_js_message.append(deck_panel.on_js_message)
     gui_hooks.top_toolbar_did_init_links.append(_add_toolbar_link)

@@ -20,7 +20,7 @@ from .catalog import (
     SPECIES_BY_ID,
     species_in_rarity,
 )
-from .state import RECENT_REWARDS_KEPT, FarmState, Plant
+from .state import CATCH_UP_DAYS, RECENT_REWARDS_KEPT, FarmState, Plant
 
 
 class GameError(Exception):
@@ -38,6 +38,19 @@ class MoveResult:
 
 
 # ---- rewards -----------------------------------------------------------
+
+
+def earns_seed(*, ease: int, review_type: int, ivl: int, time_ms: int, min_ms: float) -> bool:
+    """Does this review-log entry earn a seed? Only answers that *complete*
+    a card do: afterwards it sits in the review queue (a passed review, or a
+    card graduating from learning). The revlog's ivl is the new interval:
+    positive = days, negative = seconds for a (re)learning step.
+
+    Used for live rewards and for catching up on phone reviews, so the two
+    always agree on what counts.
+    """
+    real_answer = ease > 0 and 0 <= review_type <= 3  # not a manual reschedule
+    return real_answer and ivl > 0 and time_ms >= min_ms
 
 
 def roll_rarity(
@@ -69,9 +82,11 @@ def grant_seed(
     auto_plant: bool = False,
     rng: random.Random | None = None,
     packet_deck: int | None = None,
+    review_day: int | None = None,
 ) -> str | None:
     """Give the player one seed. Returns the tile it was planted on, or None
-    if it went into the bag."""
+    if it went into the bag. Pass review_day when the seed pays for a review,
+    so catch_up() knows that review has been rewarded."""
     _check_species(species)
     tile = None
     empty = state.empty_tiles()
@@ -82,10 +97,14 @@ def grant_seed(
         state.bag[species] = state.bag.get(species, 0) + 1
     state.discover(species, 1)
     state.bump_stat("seeds_earned")
+    if review_day is not None:
+        state.review_days[review_day] = state.review_days.get(review_day, 0) + 1
     if revlog_id is not None:
         reward: dict[str, Any] = {"rid": revlog_id, "species": species, "tile": tile}
         if packet_deck is not None:
             reward["packet"] = packet_deck
+        if review_day is not None:
+            reward["day"] = review_day
         state.recent_rewards.append(reward)
         del state.recent_rewards[:-RECENT_REWARDS_KEPT]
     return tile
@@ -148,6 +167,9 @@ def revoke_reward(state: FarmState, reward: dict[str, Any]) -> bool:
         state.bump_stat("seeds_earned", -1)
     if reward in state.recent_rewards:
         state.recent_rewards.remove(reward)
+    day = reward.get("day")
+    if day is not None and state.review_days.get(day, 0) > 0:
+        state.review_days[day] -= 1
     # undoing the review that cleared a deck makes its packet claimable again
     deck = reward.get("packet")
     claimed = state.daily.get("decks", [])
@@ -155,6 +177,43 @@ def revoke_reward(state: FarmState, reward: dict[str, Any]) -> bool:
         claimed.remove(deck)
         state.bump_stat("packets", -1)
     return removed
+
+
+def ensure_started(state: FarmState, now_rid: int) -> None:
+    """Remember when the add-on started paying out, so reviews from before
+    it was installed don't flood the bag on first sync."""
+    if state.start_rid is None:
+        state.start_rid = now_rid
+
+
+def catch_up(
+    state: FarmState,
+    reviews: list[tuple[int, int, bool]],
+    *,
+    today: int,
+    auto_plant: bool = False,
+    rng: random.Random | None = None,
+) -> list[str]:
+    """Pay out reviews the add-on didn't see live (done on a phone, then
+    synced). `reviews` is every eligible review of the last CATCH_UP_DAYS
+    days as (revlog id, scheduler day, was mature). For each day, anything
+    beyond the number already rewarded earns a seed. Returns the seeds."""
+    rng = rng or random
+    by_day: dict[int, list[bool]] = {}
+    for rid, day, mature in sorted(reviews):
+        if state.start_rid is not None and rid < state.start_rid:
+            continue
+        by_day.setdefault(day, []).append(mature)
+    seeds = []
+    for day, matures in sorted(by_day.items()):
+        done = state.review_days.get(day, 0)
+        for mature in matures[done:]:
+            species = roll_species(rng, mature=mature)
+            grant_seed(state, species, auto_plant=auto_plant, rng=rng, review_day=day)
+            seeds.append(species)
+    for day in [d for d in state.review_days if d <= today - CATCH_UP_DAYS]:
+        del state.review_days[day]
+    return seeds
 
 
 # ---- player actions ----------------------------------------------------

@@ -2,7 +2,7 @@
 
 **sound** – play retro sound effects in the farm window. Can also be toggled inside the farm window.
 
-**min_answer_seconds** – answers faster than this don't earn a seed, so you can't farm seeds by clicking through cards.
+**min_answer_seconds** – seeds are only earned when an answer completes a card (it ends up in the review queue; learning steps earn nothing). Answers faster than this don't earn a seed, so you can't farm seeds by clicking through cards.
 
 **show_tooltips** – show a short "🌱 +1 seed" message after each rewarded review.
 

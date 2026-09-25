@@ -60,6 +60,39 @@ class RewardTests(unittest.TestCase):
         self.assertGreater(boosted, normal)
 
 
+class EarnsSeedTests(unittest.TestCase):
+    """Only answers that complete a card earn a seed."""
+
+    def earns(self, ease=3, review_type=1, ivl=5, time_ms=4000):
+        return rules.earns_seed(
+            ease=ease, review_type=review_type, ivl=ivl, time_ms=time_ms, min_ms=1500
+        )
+
+    def test_passed_review(self):
+        self.assertTrue(self.earns())
+
+    def test_graduating_new_card(self):
+        self.assertTrue(self.earns(review_type=0, ivl=1))
+
+    def test_learning_step_earns_nothing(self):
+        self.assertFalse(self.earns(review_type=0, ivl=-600))  # next step in 10 min
+
+    def test_lapse_into_relearning_earns_nothing(self):
+        self.assertFalse(self.earns(ease=1, review_type=1, ivl=-600))
+
+    def test_relearned_card_back_in_review(self):
+        self.assertTrue(self.earns(review_type=2, ivl=1))
+
+    def test_every_button_is_equal_when_it_completes(self):
+        for ease in (1, 2, 3, 4):
+            self.assertTrue(self.earns(ease=ease, ivl=3))
+
+    def test_too_fast_or_manual(self):
+        self.assertFalse(self.earns(time_ms=800))
+        self.assertFalse(self.earns(ease=0, review_type=4))  # manual reschedule
+        self.assertFalse(self.earns(review_type=3, ivl=0))  # filtered-deck preview
+
+
 class PacketTests(unittest.TestCase):
     def test_packet_once_per_deck_per_day(self):
         s = FarmState()
@@ -95,6 +128,55 @@ class PacketTests(unittest.TestCase):
         rules.claim_packet(s, day=5, deck_id=1)
         again = FarmState.from_dict(s.to_dict())
         self.assertIsNone(rules.claim_packet(again, day=5, deck_id=1))
+
+
+class CatchUpTests(unittest.TestCase):
+    """Reviews done on a phone arrive later through sync."""
+
+    def test_phone_reviews_earn_seeds_once(self):
+        s = FarmState(start_rid=0)
+        phone = [(100 + i, 10, False) for i in range(5)]
+        self.assertEqual(len(rules.catch_up(s, phone, today=10)), 5)
+        self.assertEqual(rules.catch_up(s, phone, today=10), [])
+        self.assertEqual(s.bag_total(), 5)
+
+    def test_desktop_reviews_are_not_paid_twice(self):
+        s = FarmState(start_rid=0)
+        rules.grant_seed(s, "corn", revlog_id=500, review_day=10)  # live, desktop
+        reviews = [(500, 10, False), (90, 10, False), (91, 10, False)]  # + 2 from phone
+        self.assertEqual(len(rules.catch_up(s, reviews, today=10)), 2)
+        self.assertEqual(s.bag_total(), 3)
+
+    def test_late_sync_from_earlier_day(self):
+        s = FarmState(start_rid=0)
+        rules.grant_seed(s, "corn", revlog_id=900, review_day=11)
+        # phone reviews from yesterday only sync today
+        reviews = [(800, 10, False), (801, 10, True), (900, 11, False)]
+        self.assertEqual(len(rules.catch_up(s, reviews, today=11)), 2)
+
+    def test_reviews_before_install_ignored(self):
+        s = FarmState()
+        rules.ensure_started(s, now_rid=1000)
+        rules.ensure_started(s, now_rid=5000)  # only the first call counts
+        reviews = [(999, 10, False), (1000, 10, False)]
+        self.assertEqual(len(rules.catch_up(s, reviews, today=10)), 1)
+
+    def test_undo_of_live_review_frees_the_count(self):
+        s = FarmState(start_rid=0)
+        rules.grant_seed(s, "corn", revlog_id=5, review_day=10)
+        rules.revoke_reward(s, s.recent_rewards[0])
+        self.assertEqual(s.review_days.get(10), 0)
+        self.assertEqual(rules.catch_up(s, [], today=10), [])
+
+    def test_old_days_pruned(self):
+        s = FarmState(start_rid=0, review_days={1: 4, 50: 2})
+        rules.catch_up(s, [], today=50)
+        self.assertEqual(s.review_days, {50: 2})
+
+    def test_round_trip_keeps_counts(self):
+        s = FarmState(start_rid=7, review_days={10: 3})
+        again = FarmState.from_dict(s.to_dict())
+        self.assertEqual((again.start_rid, again.review_days), (7, {10: 3}))
 
 
 class BoardTests(unittest.TestCase):

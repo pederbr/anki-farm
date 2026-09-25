@@ -16,6 +16,8 @@ SCHEMA_VERSION = 1
 START_SIZE = 5
 # how many recent rewards we remember so an undo can take them back
 RECENT_REWARDS_KEPT = 30
+# how far back reviews synced from other devices (phones) are paid out
+CATCH_UP_DAYS = 30
 
 
 @dataclass
@@ -41,6 +43,11 @@ class FarmState:
     recent_rewards: list[dict[str, Any]] = field(default_factory=list)
     # {"day": scheduler day number, "decks": [deck ids that paid a packet]}
     daily: dict[str, Any] = field(default_factory=dict)
+    # scheduler day -> number of reviews that have earned their seed. Used to
+    # pay out reviews synced from phones, which the add-on never sees live.
+    review_days: dict[int, int] = field(default_factory=dict)
+    # reviews older than this revlog id (the add-on's install time) earn nothing
+    start_rid: int | None = None
 
     # ---- helpers -------------------------------------------------------
 
@@ -82,6 +89,8 @@ class FarmState:
             "stats": dict(self.stats),
             "recent": list(self.recent_rewards),
             "daily": dict(self.daily),
+            "days": {str(d): n for d, n in self.review_days.items()},
+            "start": self.start_rid,
         }
 
     @classmethod
@@ -108,6 +117,9 @@ class FarmState:
         state.stats = {k: int(n) for k, n in (data.get("stats") or {}).items()}
         state.recent_rewards = list(data.get("recent") or [])[-RECENT_REWARDS_KEPT:]
         state.daily = dict(data.get("daily") or {})
+        state.review_days = {int(d): int(n) for d, n in (data.get("days") or {}).items()}
+        start = data.get("start")
+        state.start_rid = int(start) if start is not None else None
         return state
 
 

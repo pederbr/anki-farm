@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import random
+import time
 
 from anki.cards import Card
 from anki.utils import ids2str
@@ -12,26 +13,37 @@ from aqt.utils import tooltip
 from . import farm_dialog, storage
 from .game import rules
 from .game.catalog import MATURE_IVL, PACKET_MIN_REVIEWS, RARITIES, SPECIES_BY_ID
+from .game.state import CATCH_UP_DAYS
 
 
 def on_answer(reviewer, card: Card, ease: int) -> None:
-    # Every answer button gives the same reward, so the game never nudges
-    # you towards pressing Easy.
+    # Only answers that complete a card (it leaves learning, or passes a
+    # review) earn a seed; which button you pressed doesn't change the reward.
     row = mw.col.db.first(
-        "select id, time, lastIvl from revlog where cid = ? order by id desc limit 1",
+        "select id, time, lastIvl, ivl, type from revlog where cid = ? order by id desc limit 1",
         card.id,
     )
     if not row:
         return
-    revlog_id, time_ms, last_ivl = row
+    revlog_id, time_ms, last_ivl, ivl, review_type = row
     conf = storage.addon_config()
-    if time_ms < float(conf.get("min_answer_seconds", 1.5)) * 1000:
+    min_ms = float(conf.get("min_answer_seconds", 1.5)) * 1000
+    if not rules.earns_seed(
+        ease=ease, review_type=review_type, ivl=ivl, time_ms=time_ms, min_ms=min_ms
+    ):
         return
 
     auto_plant = bool(conf.get("auto_plant", False))
     species = rules.roll_species(random, mature=last_ivl >= MATURE_IVL)
     state = storage.load()
-    tile = rules.grant_seed(state, species, revlog_id=revlog_id, auto_plant=auto_plant)
+    rules.ensure_started(state, revlog_id)
+    tile = rules.grant_seed(
+        state,
+        species,
+        revlog_id=revlog_id,
+        auto_plant=auto_plant,
+        review_day=mw.col.sched.today,
+    )
 
     packet = None
     if _deck_cleared():
@@ -59,6 +71,45 @@ def on_answer(reviewer, card: Card, ease: int) -> None:
         farm_dialog.refresh_if_open({"kind": "packet", "species": packet})
     else:
         farm_dialog.refresh_if_open({"kind": "reward", "species": species, "tile": tile})
+
+
+def catch_up() -> None:
+    """Pay out reviews done on other devices (phones) once they've synced in.
+    Runs when the profile opens and after every sync."""
+    if not mw.col:
+        return
+    conf = storage.addon_config()
+    state = storage.load()
+    rules.ensure_started(state, int(time.time() * 1000))
+    sched = mw.col.sched
+    cutoff_ms = sched.day_cutoff * 1000
+    since_ms = max(state.start_rid or 0, cutoff_ms - CATCH_UP_DAYS * 86_400_000)
+    min_ms = float(conf.get("min_answer_seconds", 1.5)) * 1000
+    rows = mw.col.db.all(
+        "select id, lastIvl, ivl, ease, type, time from revlog where id >= ?", since_ms
+    )
+    reviews = [
+        (rid, sched.today - (cutoff_ms - rid - 1) // 86_400_000, last_ivl >= MATURE_IVL)
+        for rid, last_ivl, ivl, ease, review_type, time_ms in rows
+        if rules.earns_seed(
+            ease=ease, review_type=review_type, ivl=ivl, time_ms=time_ms, min_ms=min_ms
+        )
+    ]
+    seeds = rules.catch_up(
+        state,
+        reviews,
+        today=sched.today,
+        auto_plant=bool(conf.get("auto_plant", False)),
+    )
+    storage.save(state)
+    if not seeds:
+        return
+    if conf.get("show_tooltips", True):
+        n = len(seeds)
+        tooltip(f"🌱 +{n} seed{'s' if n != 1 else ''} from reviews on your other devices", period=3000)
+    farm_dialog.refresh_if_open({"kind": "catch_up", "species": seeds})
+    if mw.state == "deckBrowser":
+        mw.deckBrowser.refresh()
 
 
 def _deck_cleared() -> bool:

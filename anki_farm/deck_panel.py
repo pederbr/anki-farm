@@ -31,6 +31,7 @@ def render(deck_browser, content) -> None:
 def panel_html(conf: dict[str, Any]) -> str:
     state = storage.load()
     base = farm_dialog.web_base()
+    v = farm_dialog.asset_version()
     found, total = almanac_progress(state)
     bag = state.bag_total()
     is_open = "" if conf.get("almanac_collapsed", False) else " open"
@@ -61,7 +62,7 @@ def panel_html(conf: dict[str, Any]) -> str:
     bag_text = f"{bag} seed{'s' if bag != 1 else ''} in bag"
     return f"""
 <style>
-@font-face {{ font-family: "AnkiFarmPixel"; src: url("{base}/fonts/kenney-pixel.ttf"); }}
+@font-face {{ font-family: "AnkiFarmPixel"; src: url("{base}/fonts/kenney-pixel.ttf?v={v}"); }}
 #anki-farm-almanac {{
   --af-bg: #f6ecd6; --af-frame: #8a5a33; --af-ink: #3b2a1a; --af-muted: #8b7a64;
   --af-card: #fffaf0; --af-pip: #e3d5b8;
@@ -108,7 +109,7 @@ def panel_html(conf: dict[str, Any]) -> str:
 #anki-farm-almanac .r-legendary {{ --rc: #e2a43c; }}
 #anki-farm-almanac .afarm-portrait {{
   width: {CELL}px; height: {CELL}px; image-rendering: pixelated;
-  background-image: url("{base}/sprites/crops.png");
+  background-image: url("{base}/sprites/crops.png?v={v}");
   background-size: {192 * SCALE}px {160 * SCALE}px;
 }}
 #anki-farm-almanac .unknown .afarm-portrait {{ filter: brightness(0); opacity: .25; }}

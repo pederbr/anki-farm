@@ -24,7 +24,7 @@ Review a card ──► get a seed (random plant, random rarity)
 ### Reward rules (anti-cheese)
 | Rule | Why |
 |---|---|
-| Again, Hard, Good and Easy all give **1 seed** | Honest "Again" answers are never punished. "Easy" is never favoured, so the add-on can't bias your scheduling. |
+| **1 seed each time a card is completed**, meaning the answer leaves it in the review queue (a passed review, or a card graduating from learning). Learning and relearning steps give nothing. | A seed is a reward for learning a card, not for clicking through it. The button you press doesn't change the reward, so "Easy" is never favoured. A lapsed card earns its seed again once it's relearned. |
 | No reward if the answer took less than about 1.5 s (configurable) | Stops spam-clicking through cards. |
 | Undoing a review (Ctrl+Z) takes the seed back | Keeps the numbers honest. |
 | Bonus seed packet when you finish all due cards in a deck for the day | Rewards finishing, not grinding new cards. |
